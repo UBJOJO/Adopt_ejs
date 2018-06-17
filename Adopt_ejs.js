@@ -1,8 +1,11 @@
-var express = require('express')
-var session = require('express-session')
-var MySQLStore = require('express-mysql-session')(session)
-var bodyParser = require('body-parser')
-var app = express()
+const express = require('express')
+const session = require('express-session')
+const MySQLStore = require('express-mysql-session')(session)
+const bodyParser = require('body-parser')
+const app = express()
+const crypto = require('crypto')
+const mysql = require('async-mysql')
+let connection
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(session({
   secret: 'djqiowjd2212@@!sd32dk9023kjd09j',
@@ -29,25 +32,21 @@ app.get('/adopt_logout', function(req, res){
   res.redirect('/welcome')
 })
 
-var users =[
-  {
-    username:'egoing',
-    password:'111',
-    displayName:'Egoing'
-  }
-];
+function createPW(pw) {
+  return crypto.createHash('sha512').update(pw).digest('hex')
+}
 
-app.post('/adopt_login', function(req, res){
-  var uname = req.body.username;
-  var pwd = req.body.password;
-  for(var i=0; i<users.length; i++){
-    var user = users[i];
-    if(uname === user.username && pwd === user.password){
-      req.session.displayName = user.displayName;
-      return res.redirect('/welcome');
-    }
+app.post('/adopt_login', async function(req, res){
+  const { username:uname, password:pwd } = req.body;
+  const query = `SELECT displayName FROM adoptdb where username='${uname}' and password='${createPW(pwd)}';`
+  console.log(query)
+  const result = await connection.query(query)
+
+  if(result.length === 1){
+    req.session.displayName = result[0].displayName;
+    return res.redirect('/welcome');
   }
-    res.send('Who are u <a href="/Adopt_login">Login</a>');
+  res.send('Who are u <a href="/Adopt_login">Login</a>');
 });
 
 app.get('/welcome', function(req, res){
@@ -86,18 +85,34 @@ app.get('/adopt_register', function(req, res){
   res.send(output)
 })
 
-app.post('/adopt_register', function(req, res){
-  users.push({
-    username:req.body.username,
-    password:req.body.password,
-    displayName:req.body.displayName
-  })
-  req.session.displayName = req.body.displayName;
-  req.session.save(function(){
-    res.redirect('/welcome')
-  })
+app.post('/adopt_register', async function(req, res){
+  // 변수 선언
+  const {username: name, password: pw, displayName} = req.body
+
+  // 중복 체크
+  const checkQuery = `SELECT displayName FROM adoptdb where displayName='${displayName}';`
+  console.log('checkQuery : ', checkQuery)
+  const result1 = await connection.query(checkQuery)
+  console.log('result1 : ', result1)
+  if (result1.length != 0){
+    console.log('Wrong')
+  } else {
+    // 실제 가입처리
+    const query = `INSERT INTO adoptdb(username, password, displayName) VALUES('${name}', '${createPW(pw)}', '${displayName}');`
+    const result = await connection.query(query)
+    req.session.displayName = req.body.displayName;
+    req.session.save(function(){
+      res.redirect('/welcome')
+    })
+  }
 })
 
-app.listen(3003, function(){
+app.listen(3003, async function(){
+  connection = await mysql.connect({
+    host:'localhost',
+    user: 'root',
+    password: 'root'
+  })
+  await connection.query('use adopt')
   console.log('Connected 3003!');
 });
